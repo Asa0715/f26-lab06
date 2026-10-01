@@ -40,13 +40,21 @@ My prediction (Yes) was correct. Both existing call sites, FrontDesk.java:27 and
 
 ### Prediction (write this before you run the build)
 
-**Will the untouched consumer still compile and pass?** Yes or no, and if no,
-which module goes red and whether at compile time or test time.
+**Will the untouched consumer still compile and pass?** 
 
-**Where.** Name the call sites you expect to be affected, if any.
+No, `lab06-consumer` goes red at compile time, not test time. After the fold, BookingApi has only `createBooking(BookingRequest)`, so the consumer's existing 4-argument calls no longer match any method.
+
+**Where.** 
+
+- FrontDesk.java:27 (bookWalkIn)
+- FrontDesk.java:33 (joinWaitlist)
 
 **What about the tests in `api/`, after you update them?** And whether their
 result is evidence about the consumer.
+
+After update, they should pass: all five tests in InMemoryBookingServiceTest should pass, and lab06-api stays green. 
+
+That result is not evidence about the consumer. The api/ tests are written by the API owner against the new contract, so they only show that the new method is implemented correctly. They never compile or run any consumer code, so they cannot see that FrontDesk.java:27 and :33 still use the old 4-argument signature. Only the consumer's own build, when it recompiles against the new API, can detect that break. 
 
 ### Step 1: after the fold
 
