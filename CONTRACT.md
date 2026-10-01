@@ -11,19 +11,28 @@ Keep it short and specific. Point at methods, call sites, and error text.
 
 ### Prediction (write this before you run the build, and you can deliberate with your agent)
 
-**Will the consumer, untouched, still compile and pass?** Yes or no.
+**Will the consumer, untouched, still compile and pass?** Yes.
 
-**Why.** What does the compiler do with the consumer's existing call sites once
-the new overload exists?
+**Why.** 
+In general it depends on how the overload differs from the existing method.
+When the consumer is recompiled, the compiler re-runs overload resolution at
+each existing `createBooking` call site: it collects every overload the
+arguments could match and picks the most specific one.
+
+Here the new overload adds a parameter, so its number of parameters differs from every existing call site (4 args at FrontDesk.java:27 and :33). Tthe compiler still picks the original `createBooking(String, long, long, String)` at both sites. Even the `null` at line 27 is not ambiguous, since only one overload takes 4 arguments.
+
+If an overload instead had the same number of parameters and differed only intype, e.g. `createBooking(String, long, long, Integer)`, the `null` at line 27 would match both, neither is more specific, and the compiler would fail with "reference to createBooking is ambiguous".
+
 
 ### What happened
 
-**The result.** What the build printed for each module.
+**The result.** The consumer was recompiled against the changed `api` module without being
+edited, and it still compiled and passed. It did not notice the new overload.
 
-**If your prediction was wrong,** say what you missed.
+**If your prediction was wrong,** 
+My prediction (Yes) was correct. Both existing call sites, FrontDesk.java:27 and :33, pass 4 arguments. The new overload takes 5 parameters, so overload resolution still picks the original createBooking(String, long, long, String).
 
-**Is an additive change always safe in Java?** One case where adding something
-to an API still breaks a caller, if you can name one.
+**Is an additive change always safe in Java?** No, like I mentioned in prediction, if someone adds an overload with the same number of parameters but a different type, for example createBooking(String, long, long, Integer). Then the call api.createBooking(roomId, s, e, null) at FrontDesk.java:27 matches both versions, and neither is more specific. The consumer fails to compile with reference to createBooking is ambiguous, even though no existing method changed.
 
 ---
 
