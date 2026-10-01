@@ -20,23 +20,23 @@ import java.util.List;
 public interface BookingApi {
 
     /**
-     * Books a room for the half-open range {@code [startMinute, endMinute)}.
+     * Books a room for the half-open range
+     * {@code [request.getStartMinute(), request.getEndMinute())}.
      *
      * <p>If no CONFIRMED booking on that room overlaps the range, the returned
      * booking is CONFIRMED and holds the room.
      *
      * <p>If some CONFIRMED booking does overlap, what happens next is decided
-     * by {@code waitlistKey}:
+     * by the request's waitlist key:
      * <ul>
-     *   <li>{@code waitlistKey} null means do not waitlist on conflict. No
-     *       booking is created and the method returns null. Nothing about the
-     *       room's schedule changes.</li>
-     *   <li>{@code waitlistKey} non-null means waitlist on conflict. A booking
-     *       is created with status WAITLISTED, carrying the key, and returned.
-     *       It does not hold the room. It becomes CONFIRMED only if it is later
-     *       promoted, which happens when a conflicting booking is cancelled
-     *       with notification (see
-     *       {@link #cancelBooking(long, boolean)}).</li>
+     *   <li>A null key means do not waitlist on conflict. No booking is
+     *       created and the method returns null. Nothing about the room's
+     *       schedule changes.</li>
+     *   <li>A non-null key means waitlist on conflict. A booking is created
+     *       with status WAITLISTED, carrying the key, and returned. It does not
+     *       hold the room. It becomes CONFIRMED only if it is later promoted,
+     *       which happens when a conflicting booking is cancelled with
+     *       notification (see {@link #cancelBooking(long, boolean)}).</li>
      * </ul>
      *
      * <p>The key itself is an opaque caller-supplied string. This API stores it
@@ -44,8 +44,31 @@ public interface BookingApi {
      * interprets it. The key has no effect when there is no conflict: the
      * booking is CONFIRMED and the key is simply retained.
      *
+     * <p>The notes are likewise an opaque caller-supplied string, stored and
+     * handed back on {@link Booking#getNotes()}. They have no effect on
+     * conflicts, waitlisting, ids, or the return value. When no booking is
+     * created, the notes are discarded along with it.
+     *
      * <p>Ids are assigned by the implementation, are unique, and increase in
      * creation order.
+     *
+     * @param request the room, range, optional waitlist key, and optional
+     *                notes for the booking, non-null
+     * @return the CONFIRMED booking, the WAITLISTED booking, or null when the
+     *         range conflicts and the request has no waitlist key
+     * @throws IllegalArgumentException if {@code request} is null, its room id
+     *         is null, or its end minute is not greater than its start minute
+     */
+    Booking createBooking(BookingRequest request);
+
+    /**
+     * Books a room for {@code [startMinute, endMinute)}, waitlisting on
+     * conflict only when {@code waitlistKey} is non-null. The booking has null
+     * notes.
+     *
+     * <p>Equivalent to
+     * {@code createBooking(new BookingRequest(roomId, startMinute, endMinute).withWaitlistKey(waitlistKey))},
+     * and keeps every promise of {@link #createBooking(BookingRequest)}.
      *
      * @param roomId      the room to book, non-null
      * @param startMinute first minute of the booking, inclusive
@@ -56,21 +79,23 @@ public interface BookingApi {
      *         range conflicts and no waitlist key was given
      * @throws IllegalArgumentException if {@code roomId} is null or
      *         {@code endMinute} is not greater than {@code startMinute}
+     * @deprecated Use {@link #createBooking(BookingRequest)} with
+     *             {@link BookingRequest#withWaitlistKey(String)} instead.
      */
-    Booking createBooking(String roomId, long startMinute, long endMinute,
-                          String waitlistKey);
+    @Deprecated
+    default Booking createBooking(String roomId, long startMinute, long endMinute,
+                                  String waitlistKey) {
+        return createBooking(new BookingRequest(roomId, startMinute, endMinute)
+                .withWaitlistKey(waitlistKey));
+    }
 
     /**
-     * Books a room exactly as {@link #createBooking(String, long, long, String)}
-     * does, and also attaches free-form notes to the booking.
+     * Books a room for {@code [startMinute, endMinute)} with notes, waitlisting
+     * on conflict only when {@code waitlistKey} is non-null.
      *
-     * <p>The notes are an opaque caller-supplied string. This API stores them
-     * and hands them back on {@link Booking#getNotes()}; it never interprets
-     * them, and they have no effect on conflicts, waitlisting, ids, or the
-     * return value. When the range conflicts and {@code waitlistKey} is null,
-     * no booking is created, so the notes are discarded along with it.
-     *
-     * <p>Bookings created through the four-argument overload have null notes.
+     * <p>Equivalent to
+     * {@code createBooking(new BookingRequest(roomId, startMinute, endMinute).withWaitlistKey(waitlistKey).withNotes(notes))},
+     * and keeps every promise of {@link #createBooking(BookingRequest)}.
      *
      * @param roomId      the room to book, non-null
      * @param startMinute first minute of the booking, inclusive
@@ -82,9 +107,16 @@ public interface BookingApi {
      *         range conflicts and no waitlist key was given
      * @throws IllegalArgumentException if {@code roomId} is null or
      *         {@code endMinute} is not greater than {@code startMinute}
+     * @deprecated Use {@link #createBooking(BookingRequest)} with
+     *             {@link BookingRequest#withWaitlistKey(String)} and
+     *             {@link BookingRequest#withNotes(String)} instead.
      */
-    Booking createBooking(String roomId, long startMinute, long endMinute,
-                          String waitlistKey, String notes);
+    @Deprecated
+    default Booking createBooking(String roomId, long startMinute, long endMinute,
+                                  String waitlistKey, String notes) {
+        return createBooking(new BookingRequest(roomId, startMinute, endMinute)
+                .withWaitlistKey(waitlistKey).withNotes(notes));
+    }
 
     /**
      * Returns every non-cancelled booking for one room, ordered by start minute.
