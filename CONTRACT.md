@@ -192,27 +192,117 @@ Not coded. One misuse, one redesign, one cost. Discuss it with your TA.
 
 ### The misuse
 
-**What is easy to get wrong.** One specific thing about the API surface.
+**What is easy to get wrong.** 
 
-**The call site.** File and line in `consumer/`, with the call. Show the
-code that a reader cannot understand without opening the javadoc, or that a
-caller could get wrong with the compiler still happy.
+The fourth argument of `createBooking`, `waitlistKey`, does two jobs at once.
+Whether it is null **decides the behavior on conflict**: null means "reject",
+non-null means "waitlist". When it is non-null, it is also the data that gets
+stored. The choice "should this booking waitlist?" is hidden inside whether a
+`String` happens to be null.
 
-**What goes wrong when it happens.** Silent bad behavior, wrong data, a crash
-somewhere far away?
+**The call site.** 
+
+`consumer/src/main/java/edu/cmu/cs214/frontdesk/FrontDesk.java:27` (`bookWalkIn`):
+```java
+return api.createBooking(roomId, startMinute, endMinute, null);
+```
+`consumer/src/main/java/edu/cmu/cs214/frontdesk/FrontDesk.java:33` (`joinWaitlist`):
+```java
+return api.createBooking(roomId, startMinute, endMinute, guestName);
+```
+
+A reader cannot tell what the `null` on line 27 means without opening the
+javadoc. It looks like "no key" or "no notes", but it actually means "do not
+waitlist on conflict". The two lines look almost the same but behave
+differently, and the compiler accepts every mix-up:
+- passing `guestName` on line 27 (e.g. "to record the guest's name") silently
+  turns a walk-in into a waitlisted booking;
+- if `guestName` is null on line 33, the guest is silently **not** waitlisted;
+- `""` is non-null, so it waitlists with an empty key.
+
+**What goes wrong when it happens.** 
+
+Silent bad behavior. Nothing crashes and nothing is logged. With a null
+`guestName`, `joinWaitlist` returns null on conflict, and the guest believes
+they are in line when no booking exists. With a key passed to a walk-in, the
+desk gets back a WAITLISTED booking where it expected null. The mistake surfaces much later,
+when someone is not promoted or is promoted unexpectedly, far from the call
+site that caused it.
 
 ### The redesign
 
-**The proposal.** Types, enums, factories, or whatever you are proposing. Show
-the new signature and the new call site.
+**The proposal.** 
 
-**Why the mistake is now hard or impossible to make.** Point at the mechanism,
-such as the compiler, a validating constructor, or an exhaustive switch.
+Replace the "null or not" switch with two named static factories on
+`BookingRequest`, and make the constructor private, so the only way to build a
+request is to say which conflict behavior you want:
+
+```java
+public final class BookingRequest {
+    /** On conflict, create nothing and return null. Takes no key. */
+    public static BookingRequest rejectOnConflict(String roomId, long startMinute,
+                                                  long endMinute) { ... }
+
+    /** On conflict, create a WAITLISTED booking. The key must be non-null and non-blank. */
+    public static BookingRequest waitlistOnConflict(String roomId, long startMinute,
+                                                    long endMinute, String waitlistKey) {
+        if (waitlistKey == null || waitlistKey.isBlank()) {
+            throw new IllegalArgumentException("waitlistKey is required to waitlist");
+        }
+        ...
+    }
+
+    public BookingRequest withNotes(String notes) { ... }
+
+    private BookingRequest(...) { ... }
+}
+```
+
+New call sites in `FrontDesk.java`:
+```java
+// line 27, bookWalkIn
+return api.createBooking(
+        BookingRequest.rejectOnConflict(roomId, startMinute, endMinute));
+
+// line 33, joinWaitlist
+return api.createBooking(
+        BookingRequest.waitlistOnConflict(roomId, startMinute, endMinute, guestName));
+```
+
+**Why the mistake is now hard or impossible to make.** 
+
+- **The compiler, through the method name.** A caller must pick
+  `rejectOnConflict` or `waitlistOnConflict`, so the conflict behavior is
+  written at the call site in words. A reader no longer needs the javadoc to
+  understand line 27. There is no way to pass a key to `rejectOnConflict`, so
+  "record the guest's name on a walk-in" can no longer turn it into a waitlist
+  by accident. 
+- **A validating factory.** `waitlistOnConflict` throws
+  `IllegalArgumentException` on a null or blank key, at the moment the request
+  is built. A missing `guestName` on line 33 now fails loudly at that call site,
+  instead of silently not waitlisting the guest.
+- **A private constructor.** Callers cannot bypass the factories, so every
+  `BookingRequest` that reaches `createBooking` has passed one of the two
+  checks.
 
 ### One tradeoff
 
-**What it costs.** Something real, such as caller ceremony, migration burden
-against the deprecation path you just built, or more types for a newcomer to
-learn. "No real downside" does not count.
+**What it costs.** 
 
-**When the price is worth paying.** A condition under which it is.
+**Migration burden on top of the deprecation path we just built.** Step 2
+already deprecated the positional `createBooking` overloads in favor of
+`createBooking(BookingRequest)`. This redesign would deprecate
+`new BookingRequest(...)` and `withWaitlistKey(...)` as well. The front desk
+team would then face a second migration of the same two lines,
+`FrontDesk.java:27` and `:33`, and the API owner would have to keep a second
+set of deprecated methods working until that migration finishes.
+
+**When the price is worth paying.** 
+
+It is worth it when the mistake is silent and costly, and the API has callers
+the owner cannot check. Here, a guest who thinks they are on the waitlist but
+is not is exactly that kind of failure. The best time to pay is together with
+the breaking release we are already planning: once the step 2 deprecated
+overloads are due for removal, ship the factories in the same release. That
+way callers migrate `FrontDesk.java:27` and `:33` once, straight to
+`rejectOnConflict` and `waitlistOnConflict`, instead of twice.
